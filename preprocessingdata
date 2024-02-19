@@ -1,0 +1,177 @@
+!pip install nltk
+!pip install Sastrawi
+!pip install googletrans==3.1.0a0
+!pip install swifter
+!pip install WordCloud
+!pip install contractions
+!pip install emoji
+!pip install collections
+
+import pandas as pd
+import numpy as np
+import nltk
+from nltk.tokenize import sent_tokenize
+import re
+import emoji
+nltk.download('punkt')
+
+#load data
+df = pd.read_excel("filtered_data_trialrun.xlsx")
+def sentence_count(text):
+  text = re.sub(r'\.+', ".", text)
+  text = re.sub(r'\!', "!", text)
+  text = re.sub(r'\?+', "?", text)
+  text = emoji.replace_emoji(text)
+  text = re.sub('http[^\s]+','',str(text))
+  text = text.replace('syg! tw/korea/', '')
+  text = sent_tokenize(text)
+  return len(text)
+
+df['sentence_count'] = df['text'].apply(sentence_count)
+pd.DataFrame([df['created_at'],df['text'],df['sentence_count']]).transpose().head()
+
+#Cleansing Data
+import re
+
+def clean_tweets(text):
+    res = []
+    text = re.sub(r'\.+', ".", text)
+    text = re.sub(r'\!+', "!", text)
+    text = re.sub(r'\?+', "?", text)
+    text = re.sub(r'[^\x00-\x7F]+',' ', text)
+    text = re.sub('http[^\s]+','',str(text))
+    sentences = sent_tokenize(text)
+    for text in sentences:
+      text =  re.sub("(&amp)"," ", text)
+      #remove @
+      text = re.sub("([@#][A-Za-z0-9]+)|(\w+:\/\/\S+)"," ", text)
+      #remove RT sign in the beginning of the tweets
+      text = re.sub(r':', '', text)
+      text = re.sub(r'‚Ä¶', '', text)
+      # remove URL
+      text = re.sub('http[^\s]+','',str(text))
+      # remove tab, new line, and back slice
+      text = text.replace('\\t'," ").replace('\\n'," ").replace('\\u'," ").replace('\\',"")
+      #replace consecutive non-ASCII characters with a space
+      text = re.sub(r'[^\x00-\x7F]+',' ', text)
+      #remove punctuation manually
+      text = re.sub('[^a-zA-Z]', ' ', text)
+      #remove tags
+      text = re.sub("&lt;/?.*?&gt;","&lt;&gt;", text)
+      #remove digits and special chars
+      text = re.sub("(\\d|\\W)+"," ", text)
+      #remove other symbol from tweet
+      text = re.sub(r'â', '', text)
+      text = re.sub(r'€', '', text)
+      text = re.sub(r'¦', '', text)
+      # remove whitespace leading and trailing
+      text = text.strip()
+      # remove multiple whitespace into single whitespace
+      text = re.sub('\s+',' ',text)
+      # remove single character
+      text = re.sub(r"\b[a-zA-Z]\b", "", text)
+      res.append(text)
+    return res
+
+df['clean_text'] = df['text'].apply(clean_tweets)
+print('Cleansing Result :')
+pd.DataFrame([df['text'],df['clean_text']]).transpose().head()
+
+#Case Folding
+def case_folding(text):
+  return [sentences.casefold() for sentences in text]
+
+df['case_folding'] = df['clean_text'].apply(case_folding)
+print('Case Folding Result :')
+pd.DataFrame([df['clean_text'],df['case_folding']]).transpose().head()
+
+#Normalizing data
+slangword = pd.read_excel("kamus-salsabila_ujicoba2.xlsx")
+slangword_dict = dict(zip(slangword['before'], slangword['after']))
+
+def normalizing(text):
+    result = []
+    res = []
+    sentences = [sentence.split() for sentence in text]
+    for sen in sentences:
+      for i, word in enumerate(sen) :
+        if word in slangword_dict.keys():
+          sen[i] = slangword_dict[word]
+      result.append(' '.join(sen))
+    res.extend(result)
+    return res
+
+df['normalized'] = df['case_folding'].apply(normalizing)
+pd.DataFrame([df['case_folding'],df['normalized']]).transpose().head()
+
+from nltk.tokenize import word_tokenize
+
+#Tokenize the sentences
+def word_tokenize_wrapper(text):
+    return [word_tokenize(sentence) for sentence in text]
+
+df['tokenized'] = df['normalized'].apply(word_tokenize_wrapper)
+print('Tokenizing Result :')
+pd.DataFrame([df['normalized'],df['tokenized']]).transpose().head()
+
+#Filtering the words
+from nltk.corpus import stopwords
+from Sastrawi.StopWordRemover.StopWordRemoverFactory import StopWordRemoverFactory, StopWordRemover, ArrayDictionary
+
+stop_factory = StopWordRemoverFactory().get_stop_words()
+more_stopword = ['kalau','kan','kah','nah','meng','nih','hmm','nya','woy','sih','guys','my','cuy','deh','dah','mah','heh','hah','hey','beh','si','dong','oh','lah','loh','ih','eh','ah','kok','waduh','an','wah','wow','aduh','yah','wih','weh','uu','oalah','elah','nge','huhu','ululululuuu','asdfghj','shhsgehjsjs','absjsjbsjsnsnsks','sjdbslsbsjalmazhslabskl','mgdlgdlydlgdoydotdkfdjteid','abwjnsjsnsjwj','mem','asdfjkl','kdm','nwxksksnuskdiel','num','hueeee','ajakahfsgabakjdhsh','per','huhuhu','hmmm','xixixi','mbin','bunda','yuhu','akshsjfhuejdgsjagajdud','asksksks','beuh','ehm','sjsjsjjs','sksksk','sksksks','woohoo','cih','doang','hai','haseyo','of','psg','ie','ter','wt','ki','duh','x']
+all_stopwords = stop_factory+more_stopword
+all_stopwords.remove('tidak')
+all_stopwords.remove('bisa')
+all_stopwords.remove('belum')
+all_stopwords.remove('masih')
+all_stopwords.remove('dapat')
+dictionary = ArrayDictionary(all_stopwords)
+str_dict = StopWordRemover(dictionary)
+
+def stopwords_sastrawi(texts):
+  result = []
+  for sentence in texts:
+    filter = [word for word in sentence if word not in all_stopwords]
+    result.append(filter)
+  return result
+
+df['filtered'] = df['tokenized'].apply(stopwords_sastrawi)
+
+print('Filtering Sastrawi Result :')
+pd.DataFrame([df['tokenized'],df['filtered']]).transpose().head()
+
+#Stemming words
+import swifter
+from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
+
+# create stemmer
+factory = StemmerFactory()
+stemmer = factory.create_stemmer()
+
+# stemmed
+def stemmed_wrapper(term):
+    return stemmer.stem(term)
+
+term_dict = {}
+
+for document in df['filtered']:
+    for sentence in document:
+      for term in sentence:
+        if term not in term_dict:
+            term_dict[term] = ' '
+
+for term in term_dict:
+    term_dict[term] = stemmed_wrapper(term)
+
+# apply stemmed term to dataframe
+def get_stemmed_term(document):
+  result = []
+  for sentence in document:
+    stemming = [term_dict[term] for term in sentence]
+    result.append(stemming)
+  return result
+
+df['text_stemmed'] = df['filtered'].swifter.apply(get_stemmed_term)
+print('Stemming Sastrawi Result :')
+pd.DataFrame([df['filtered'],df['text_stemmed']]).transpose().head(10)
